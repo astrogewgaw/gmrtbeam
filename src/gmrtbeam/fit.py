@@ -40,7 +40,7 @@ class BeamFitter:
 
     def fit(
         self,
-        box: int,
+        box: float = 0.5,
         fix: bool = False,
         isophot: float = 0.5,
     ):
@@ -144,12 +144,29 @@ class BeamFitter:
                     y = y * np.rad2deg(deltafov) * 3600
                     self.contour = x, y
 
-    def plot(self, ax: uplt.Axes | None = None):
-        if self.contour is not None:
-            if ax is None:
+    def plot(
+        self,
+        show: bool = True,
+        plotbeam: bool = True,
+        save: str | None = None,
+        ax: uplt.Axes | None = None,
+        **kwargs,
+    ):
+        def _(ax: uplt.Axes):
+            if self.contour is not None:
+                if plotbeam:
+                    self.beam.plot(ax=ax, show=False)
+                ax.plot(*self.contour, lw=2, label=self.model.capitalize())
+
+        if ax is None:
+            if self.contour is not None:
                 fig = uplt.figure(width=10, height=10)
                 ax = fig.subplot()  # type: ignore
                 assert ax is not None
-            self.beam.plot(ax=ax, show=False)
-            ax.plot(*self.contour)
-            uplt.show()
+                _(ax)
+                if show:
+                    uplt.show()
+                if save is not None:
+                    fig.savefig(save, dpi=kwargs.get("dpi", 150))
+        else:
+            _(ax)

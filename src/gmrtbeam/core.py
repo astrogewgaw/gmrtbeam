@@ -373,39 +373,51 @@ class GMRTBeam:
         beamgrid /= beamgrid.max()
         self.data = beamgrid
 
-    def plot(self, ax: uplt.Axes | None = None, show: bool = True):
-        if self.data is not None:
-            if ax is None:
+    def plot(
+        self,
+        show: bool = True,
+        save: str | None = None,
+        ax: uplt.Axes | None = None,
+        **kwargs,
+    ):
+        def _(ax: uplt.Axes):
+            if self.data is not None:
+                side = np.rad2deg(self.fovsize) * 3600
+                l0, l1 = -side / 2, side / 2
+                m0, m1 = -side / 2, side / 2
+
+                hm = ax.imshow(
+                    self.data,
+                    cmap="batlow",
+                    origin="lower",
+                    vmin=self.data.min(),
+                    vmax=self.data.max(),
+                    extent=(l0, l1, m0, m1),
+                )
+                ax.invert_xaxis()
+
+                ax.format(
+                    xlabel="l (East-West) arcsec",
+                    ylabel="m (North-South) arcsec",
+                    title=(
+                        f"""
+                        Synthesized beam\n
+                        RA = {self.rastr}, DEC={self.decstr}, HA = {self.ha:.2f} (hr)\n
+                        IST = {self.ist}, $\\nu$={(self.f0 / 1.0e6):.2f} (MHz)
+                        """
+                    ),
+                )
+                ax.colorbar(hm)
+
+        if ax is None:
+            if self.data is not None:
                 fig = uplt.figure(width=10, height=10)
                 ax = fig.subplot()  # type: ignore
                 assert ax is not None
-
-            side = np.rad2deg(self.fovsize) * 3600
-            l0, l1 = -side / 2, side / 2
-            m0, m1 = -side / 2, side / 2
-
-            hm = ax.imshow(
-                self.data,
-                cmap="batlow",
-                origin="lower",
-                vmin=self.data.min(),
-                vmax=self.data.max(),
-                extent=(l0, l1, m0, m1),
-            )
-            ax.invert_xaxis()
-
-            ax.format(
-                xlabel="l (East-West) arcsec",
-                ylabel="m (North-South) arcsec",
-                title=(
-                    f"""
-                    Synthesized beam\n
-                    RA = {self.rastr}, DEC={self.decstr}, HA = {self.ha:.2f} (hr)\n
-                    IST = {self.ist}, $\\nu$={(self.f0 / 1.0e6):.2f} (MHz)
-                    """
-                ),
-            )
-
-            ax.colorbar(hm)
-            if show:
-                uplt.show()
+                _(ax)
+                if show:
+                    uplt.show()
+                if save is not None:
+                    fig.savefig(save, dpi=kwargs.get("dpi", 150))
+        else:
+            _(ax)
