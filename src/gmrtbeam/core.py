@@ -1,14 +1,15 @@
 from enum import Enum
 from datetime import datetime
+from joblib import delayed, Parallel
 from functools import cached_property
 from dataclasses import field, dataclass
 from itertools import permutations, combinations
 
 import pytz
 import numpy as np
+import ultraplot as uplt
 from astropy.time import Time
 import astropy.constants as cx
-from rich.progress import track
 from numpy.polynomial import Polynomial
 from astropy.coordinates import Latitude, Longitude, SkyCoord, EarthLocation
 
@@ -113,10 +114,10 @@ class BEAMMODE(Enum):
         2. PA: Phased array, wherein voltages are added in phase during beamforming.
                That is, I_PA = |(V_1 + V_2 + ... + V_N)|^2
         3. PC: Post-correlation phased array, which can be formed on of two ways -- either
-               by subtracting a PA - IA beam (as is done in GMRT observations), or forming
-               the beam using visibilities (as done in SPOTLIGHT's commensal and targeted
-               modes). That is, here we get I_PC = V_1*V_2 + ... + V_N-1*V_N; that is, we
-               only take the cross terms, and reject all self terms.
+               by subtracting an IA beam from a PA beam (as is done in GMRT observations),
+               or by forming the beam using visibilities (as done in SPOTLIGHT's open-sky
+               and commensal modes). That is, here we get I_PC = V_1*V_2 + ... + V_N-1*V_N;
+               that is, we only take the cross terms, and reject all self terms.
     """
 
     IA = 1
@@ -126,7 +127,6 @@ class BEAMMODE(Enum):
 
 @dataclass
 class GMRTBeam:
-
     f0: float
     rastr: str
     decstr: str
@@ -336,29 +336,76 @@ class GMRTBeam:
     def compute(self):
         cellsize = self.size / 8
         npix = int(np.floor(self.fovsize / cellsize))
-        beamgrid = np.zeros((npix, npix), dtype=np.float32)
-        for i in track(np.arange(npix), description="Computing..."):
+        beamgrid = np.ndarray((npix, npix), dtype=np.float32)
+
+        def _(i):
             ll = (-0.5 * self.fovsize) + (i * (self.fovsize / npix))
             for j in np.arange(npix):
                 mm = (-0.5 * self.fovsize) + (j * (self.fovsize / npix))
                 nn = np.sqrt(1 - ll**2 - mm**2)
-                if self.mode == BEAMMODE.PA:
-                    z1 = 0.0
-                    z2 = 0.0
-                    for A, B in self.antpairs:
-                        uA, vA, wA = self.antennas[A]["uvw"]
-                        uB, vB, wB = self.antennas[B]["uvw"]
-                        X = (uA - uB) * ll + (vA - vB) * mm + (wA - wB) * (nn - 1)
-                        z1 += np.cos(2 * np.pi * X)
-                        z2 += np.sin(2 * np.pi * X)
-                    beamgrid[j][i] = np.sqrt(z1**2 + z2**2)
-                elif self.mode == BEAMMODE.PC:
-                    z = 0
-                    for A, B in self.antpairs:
-                        uA, vA, wA = self.antennas[A]["uvw"]
-                        uB, vB, wB = self.antennas[B]["uvw"]
-                        X = (uA - uB) * ll + (vA - vB) * mm + (wA - wB) * (nn - 1)
-                        z = z + np.cos(2 * np.pi * X)
-                    beamgrid[j][i] = z
+                match self.mode:
+                    case BEAMMODE.PA:
+                        z1 = 0.0
+                        z2 = 0.0
+                        for A, B in self.antpairs:
+                            uA, vA, wA = self.antennas[A]["uvw"]
+                            uB, vB, wB = self.antennas[B]["uvw"]
+                            X = (uA - uB) * ll + (vA - vB) * mm + (wA - wB) * (nn - 1)
+                            z1 += np.cos(2 * np.pi * X)
+                            z2 += np.sin(2 * np.pi * X)
+                        beamgrid[j][i] = np.sqrt(z1**2 + z2**2)
+                    case BEAMMODE.PC:
+                        z = 0
+                        for A, B in self.antpairs:
+                            uA, vA, wA = self.antennas[A]["uvw"]
+                            uB, vB, wB = self.antennas[B]["uvw"]
+                            X = (uA - uB) * ll + (vA - vB) * mm + (wA - wB) * (nn - 1)
+                            z = z + np.cos(2 * np.pi * X)
+                        beamgrid[j][i] = z
+
+        Parallel(
+            njobs=-1,
+            verbose=20,
+            return_as="list",
+            require="sharedmem",
+        )(delayed(_)(i) for i in np.arange(npix))
+
         beamgrid /= beamgrid.max()
         self.data = beamgrid
+
+    def plot(self, ax: uplt.Axes | None = None, show: bool = True):
+        if self.data is not None:
+            if ax is None:
+                fig = uplt.figure(width=10, height=10)
+                ax = fig.subplot()  # type: ignore
+                assert ax is not None
+
+            side = np.rad2deg(self.fovsize) * 3600
+            l0, l1 = -side / 2, side / 2
+            m0, m1 = -side / 2, side / 2
+
+            hm = ax.imshow(
+                self.data,
+                cmap="batlow",
+                origin="lower",
+                vmin=self.data.min(),
+                vmax=self.data.max(),
+                extent=(l0, l1, m0, m1),
+            )
+            ax.invert_xaxis()
+
+            ax.format(
+                xlabel="l (East-West) arcsec",
+                ylabel="m (North-South) arcsec",
+                title=(
+                    f"""
+                    Synthesized beam\n
+                    RA = {self.rastr}, DEC={self.decstr}, HA = {self.ha:.2f} (hr)\n
+                    IST = {self.ist}, $\\nu$={(self.f0 / 1.0e6):.2f} (MHz)
+                    """
+                ),
+            )
+
+            ax.colorbar(hm)
+            if show:
+                uplt.show()
