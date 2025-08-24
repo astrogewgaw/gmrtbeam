@@ -1,6 +1,46 @@
 [build-system]
 requires = ["wheel", "setuptools>=45", "setuptools_scm[toml]>=6.0"]
 
+[project]
+name = "gmrtbeam"
+license = "MIT"
+readme = "README.md"
+dynamic = ["version"]
+requires-python = ">=3.10"
+license-files = ["LICENSE"]
+description = "Create and tile GMRT beams."
+authors = [{name = "The SPOTLIGHT Team", email = "spotlight@ncra.tifr.res.in"}]
+
+classifiers = [
+  "Operating System :: Unix",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Astronomy",
+]
+
+dependencies = [
+  "numpy",
+  "pytz",
+  "rich",
+  "scipy",
+  "joblib",
+  "astropy",
+  "ultraplot",
+]
+
+[project.urls]
+Source = "https://github.com/astrogewgaw/gmrtbeam"
+Homepage = "https://github.com/astrogewgaw/gmrtbeam"
+Documentation = "https://github.com/astrogewgaw/gmrtbeam"
+Issues = "https://github.com/astrogewgaw/gmrtbeam/issues"
+
+[tool.setuptools]
+zip-safe = false
+include-package-data = true
+packages = {find = {where = ["src"]}}
+
 [tool.setuptools_scm]
 write_to = "src/gmrtbeam/_version.py"
 
@@ -29,6 +69,5 @@ exclude = [
   "tests",
   "build",
   "assets",
-  "setup.py",
   "src/gmrtbeam/_version.py",
 ]
