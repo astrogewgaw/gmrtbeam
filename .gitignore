@@ -2,10 +2,12 @@ dist
 build
 .egg
 .nox
+.nvim
 .vscode
 .coverage
 __pycache__
 .mypy_cache
+docs/_build
 .pytest_cache
 .ipynb_checkpoints
 src/gmrtbeam/_version.py

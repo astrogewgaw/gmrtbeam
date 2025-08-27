@@ -1,6 +1,7 @@
 pkg  := "gmrtbeam"
 desc := ""
 
+alias d := docs
 alias c := clean
 alias i := install
 alias u := uninstall
@@ -60,3 +61,8 @@ default:
     pip uninstall {{pkg}}
     rm -rf src/{{pkg}}.egg-info
     rm -rf src/{{pkg}}/_version.py
+
+# Build docs.
+@docs:
+    echo "Building docs for {{pkg}}..."
+    sphinx-reload docs
