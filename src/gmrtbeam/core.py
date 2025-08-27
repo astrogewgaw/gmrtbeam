@@ -397,21 +397,15 @@ class GMRTBeam:
                 ax.invert_xaxis()
 
                 ax.format(
+                    title="Synthesized beam",
                     xlabel="l (East-West) arcsec",
                     ylabel="m (North-South) arcsec",
-                    title=(
-                        f"""
-                        Synthesized beam\n
-                        RA = {self.rastr}, DEC={self.decstr}, HA = {self.ha:.2f} (hr)\n
-                        IST = {self.ist}, $\\nu$={(self.f0 / 1.0e6):.2f} (MHz)
-                        """
-                    ),
                 )
                 ax.colorbar(hm)
 
         if ax is None:
             if self.data is not None:
-                fig = uplt.figure(width=10, height=10)
+                fig = uplt.figure(width=7.5, height=7.5)
                 ax = fig.subplot()  # type: ignore
                 assert ax is not None
                 _(ax)
