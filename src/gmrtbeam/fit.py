@@ -33,9 +33,40 @@ def gaussian(
 
 
 @dataclass
+class BeamEllipse:
+    a: float
+    b: float
+    e: float
+    x: np.ndarray
+    y: np.ndarray
+    t: float = 0.0
+    x0: float = 0.0
+    y0: float = 0.0
+
+    @classmethod
+    def new(
+        cls,
+        a: float,
+        b: float,
+        t: float = 0.0,
+        x0: float = 0.0,
+        y0: float = 0.0,
+    ):
+        t = np.deg2rad(t)
+        e = np.sqrt(1.0 - b * b / (a * a))
+        x = np.zeros(360, dtype=np.float32)
+        y = np.zeros(360, dtype=np.float32)
+        for i, p in enumerate(np.linspace(0, 2 * np.pi, 360)):
+            r = 0.5 * b / np.sqrt(1 - (e * np.cos(p + t)) ** 2)
+            x[i] = x0 + r * np.cos(p)
+            y[i] = y0 + r * np.sin(p)
+        return cls(a=a, b=b, e=e, t=t, x0=x0, y0=y0, x=x, y=y)
+
+
+@dataclass
 class BeamFitter:
     beam: GMRTBeam
-    contour: tuple[np.ndarray, np.ndarray] | None = None
+    contour: BeamEllipse | None = None
     model: Literal["gaussian", "elliptical"] = "gaussian"
 
     def fit(
@@ -94,20 +125,18 @@ class BeamFitter:
                     theta = theta - 180.0 if theta > 180.0 else theta
                 else:
                     b, a = Wx, Wy
-                a = a * np.sqrt(-np.log(isophot) * 2)
-                b = b * np.sqrt(-np.log(isophot) * 2)
-                t = np.deg2rad(theta + 90)
-                e = np.sqrt(1.0 - b * b / (a * a))
-                x = np.zeros(360, dtype=np.float32)
-                y = np.zeros(360, dtype=np.float32)
-
-                for i, p in enumerate(np.linspace(0, 2 * np.pi, 360)):
-                    r = b / np.sqrt(1 - (e * np.cos(p + t)) ** 2)
-                    x[i] = r * np.cos(p) + x0 - npix / 2
-                    y[i] = r * np.sin(p) + y0 - npix / 2
-                x = x * np.rad2deg(deltafov) * 3600
-                y = y * np.rad2deg(deltafov) * 3600
-                self.contour = x, y
+                t = theta + 90
+                a = 2 * a * np.sqrt(-np.log(isophot) * 2)
+                b = 2 * b * np.sqrt(-np.log(isophot) * 2)
+                self.contour = BeamEllipse.new(
+                    a=a,
+                    b=b,
+                    t=t,
+                    x0=x0 - npix / 2,
+                    y0=y0 - npix / 2,
+                )
+                self.contour.x = self.contour.x * np.rad2deg(deltafov) * 3600
+                self.contour.y = self.contour.y * np.rad2deg(deltafov) * 3600
 
             case "elliptical":
                 params = (0, 0), (-1, -1), 0
@@ -130,19 +159,15 @@ class BeamFitter:
                             params = ellipse if a > ai else params
                 if found:
                     (x0, y0), (b, a), t = params
-
-                    t = np.deg2rad(t)
-                    e = np.sqrt(1.0 - b * b / (a * a))
-                    x = np.zeros(360, dtype=np.float32)
-                    y = np.zeros(360, dtype=np.float32)
-
-                    for i, p in enumerate(np.linspace(0, 2 * np.pi, 360)):
-                        r = 0.5 * b / np.sqrt(1 - (e * np.cos(p + t)) ** 2)
-                        x[i] = r * np.cos(p) + x0 - npix / 2
-                        y[i] = r * np.sin(p) + y0 - npix / 2
-                    x = x * np.rad2deg(deltafov) * 3600
-                    y = y * np.rad2deg(deltafov) * 3600
-                    self.contour = x, y
+                    self.contour = BeamEllipse.new(
+                        a=a,
+                        b=b,
+                        t=t,
+                        x0=x0 - npix / 2,
+                        y0=y0 - npix / 2,
+                    )
+                    self.contour.x = self.contour.x * np.rad2deg(deltafov) * 3600
+                    self.contour.y = self.contour.y * np.rad2deg(deltafov) * 3600
 
     def plot(
         self,
@@ -156,11 +181,16 @@ class BeamFitter:
             if self.contour is not None:
                 if plotbeam:
                     self.beam.plot(ax=ax, show=False)
-                ax.plot(*self.contour, lw=2, label=self.model.capitalize())
+                ax.plot(
+                    self.contour.x,
+                    self.contour.y,
+                    lw=2,
+                    label=self.model.capitalize(),
+                )
 
         if ax is None:
             if self.contour is not None:
-                fig = uplt.figure(width=10, height=10)
+                fig = uplt.figure(width=7.5, height=7.5)
                 ax = fig.subplot()  # type: ignore
                 assert ax is not None
                 _(ax)
