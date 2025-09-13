@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 
 import numpy as np
-import astropy.units as ux
-from astropy.coordinates import SkyCoord
+import ultraplot as uplt
 
 from gmrtbeam.fit import BeamEllipse
 
@@ -11,7 +10,7 @@ from gmrtbeam.fit import BeamEllipse
 class GMRTMosaic:
     nbeams: int
     ellipse: BeamEllipse
-    coords: SkyCoord | None = None
+    center: tuple[float, float] | None = None
     grid: tuple[np.ndarray, np.ndarray] | None = None
 
     def _gridder(self, R: float, recenter: bool = True):
@@ -131,4 +130,32 @@ class GMRTMosaic:
         else:
             X, Y = x, y
         farea = Nopt * (self.ellipse.a * self.ellipse.b) / (4 * R * R)
-        return (X, Y), R, Nopt, (X0, Y0)
+
+        self.grid = (X, Y)
+        self.center = (X0, Y0)
+
+    def plot(
+        self,
+        show: bool = True,
+        save: str | None = None,
+        ax: uplt.Axes | None = None,
+        **kwargs,
+    ):
+        def _(ax: uplt.Axes):
+            if self.grid is not None:
+                for x, y in zip(*self.grid):
+                    ax.scatter(x, y, color="red")
+                    ax.plot(self.ellipse.x + x, self.ellipse.y + y, color="black")
+
+        if ax is None:
+            if self.grid is not None:
+                fig = uplt.figure(width=7.5, height=7.5)
+                ax = fig.subplot()  # type: ignore
+                assert ax is not None
+                _(ax)
+                if show:
+                    uplt.show()
+                if save is not None:
+                    fig.savefig(save, dpi=kwargs.get("dpi", 150))
+        else:
+            _(ax)
