@@ -5,6 +5,7 @@ import numpy as np
 from lmfit import Model
 import ultraplot as uplt
 from cv2 import fitEllipse
+from ultraplot.axes import Axes
 from skimage.measure import find_contours
 
 from gmrtbeam.core import GMRTBeam
@@ -170,7 +171,7 @@ class BeamFitter:
 
     def plot(
         self,
-        ax=None,
+        ax: Axes | None = None,
         show: bool = True,
         plotbeam: bool = True,
         save: str | None = None,

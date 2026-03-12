@@ -3,10 +3,11 @@ from dataclasses import dataclass
 from functools import cached_property
 
 import numpy as np
+import ultraplot as uplt
 import astropy.units as u
 from astropy.wcs import WCS
 from astropy.io import fits
-import matplotlib.pyplot as plt
+from ultraplot.axes import Axes
 from astropy.visualization.wcsaxes import SphericalCircle
 
 from gmrtbeam.core import GMRTBeam
@@ -197,7 +198,7 @@ class GMRTMosaic:
 
     def plot(
         self,
-        ax=None,
+        ax: Axes | None = None,
         show: bool = True,
         save: str | None = None,
         **kwargs,
@@ -264,14 +265,14 @@ class GMRTMosaic:
                 unique_labels = set(labels)
                 legend = dict(zip(labels, lines))
                 unique_lines = [legend[x] for x in unique_labels]
-                ax.legend(unique_lines, unique_labels)
+                ax.legend(unique_lines, unique_labels, loc="ur", ncol=1)
 
         if ax is None:
             if self.grid is not None:
-                fig = plt.figure(figsize=(7.5, 7.5))
-                plotter(fig.add_axes((0.1, 0.1, 0.85, 0.85), projection=self.wcs))
+                fig = getattr(uplt, "figure")(figsize=(7.5, 7.5))
+                plotter(fig.subplot(projection=self.wcs))
                 if show:
-                    plt.show()
+                    getattr(uplt, "show")()
                 if save is not None:
                     fig.savefig(save, dpi=kwargs.get("dpi", 150))
         else:

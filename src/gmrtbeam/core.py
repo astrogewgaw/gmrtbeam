@@ -12,7 +12,7 @@ from astropy.wcs import WCS
 from astropy.io import fits
 from astropy.time import Time
 import astropy.constants as cx
-import matplotlib.pyplot as plt
+from ultraplot.axes import Axes
 from joblib import delayed, Parallel
 from numpy.polynomial import Polynomial
 from astropy.coordinates import (
@@ -476,7 +476,7 @@ class GMRTBeam:
 
     def plotsky(
         self,
-        ax=None,
+        ax: Axes | None = None,
         show: bool = True,
         save: str | None = None,
         **kwargs,
@@ -490,18 +490,18 @@ class GMRTBeam:
                     vmin=self.data.min(),
                     vmax=self.data.max(),
                 )
+                ax.colorbar(hm)
                 ax.invert_xaxis()
-                plt.colorbar(hm, ax=ax)
                 ax.set_title("Synthesized beam")
                 ax.set_ylabel("Declination (Dec)")
                 ax.set_xlabel("Right ascension (RA)")
 
         if ax is None:
             if self.data is not None:
-                fig = plt.figure(figsize=(4, 4))
-                plotter(fig.add_axes((0.225, 0.1, 0.75, 0.85), projection=self.wcs))
+                fig = getattr(uplt, "figure")(width=4, height=4)
+                plotter(fig.subplot(projection=self.wcs))
                 if show:
-                    plt.show()
+                    getattr(uplt, "show")()
                 if save is not None:
                     fig.savefig(save, dpi=kwargs.get("dpi", 150))
         else:
