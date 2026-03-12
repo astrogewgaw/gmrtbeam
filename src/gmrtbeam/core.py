@@ -1,6 +1,6 @@
-from enum import Enum
+from pathlib import Path
+from enum import auto, Enum
 from datetime import datetime
-from joblib import delayed, Parallel
 from functools import cached_property
 from dataclasses import field, dataclass
 from itertools import permutations, combinations
@@ -8,10 +8,19 @@ from itertools import permutations, combinations
 import pytz
 import numpy as np
 import ultraplot as uplt
+from astropy.wcs import WCS
+from astropy.io import fits
 from astropy.time import Time
 import astropy.constants as cx
+import matplotlib.pyplot as plt
+from joblib import delayed, Parallel
 from numpy.polynomial import Polynomial
-from astropy.coordinates import Latitude, Longitude, SkyCoord, EarthLocation
+from astropy.coordinates import (
+    SkyCoord,
+    Latitude,
+    Longitude,
+    EarthLocation,
+)
 
 # GMRT's antennas list.
 # NOTE: (1) The (x, y, z) coordinates are w.r.t. C02,
@@ -53,22 +62,22 @@ GMRTANTS = {
     "S05": [-3102.11, -11245.60, 8916.26],
 }
 
-# Names of all GMRT antennas.
+# NOTE: Names of all GMRT antennas.
 GMRTANTNAMES = list(GMRTANTS.keys())
 
-# Total number of antennas at the GMRT.
-# NOTE: These are the maximum number of antennas
+# NOTE: Total number of antennas at the GMRT.
+# These are the maximum number of antennas
 # that can be used in a GMRT observation.
 GMRTNUMANT = len(GMRTANTS)
 
-# GMRT's Latitude and Longitude.
-# NOTE: These values are the ones provided online.
-# Mekhala and Sanjay have confirmed that these are
-# the ones used, so should be fine.
+# NOTE: GMRT's Latitude and Longitude. These values
+# are the ones provided online. Mekhala and Sanjay
+# have confirmed that these are the ones used, so
+# should be fine.
 GMRTLOC = EarthLocation.from_geodetic(lat="19:05:47", lon="74:02:59")
 
-# GMRT beam polynomials for each band.
-# NOTE: The polynomials are as defined in AIPS PBCOR:
+# NOTE: GMRT beam polynomials for each band. The polynomials are
+# as defined in AIPS PBCOR:
 #   1.0
 #   + X*PBPARM(3)/(10**3)
 #   + X*X*PBPARM(4)/(10**7)
@@ -96,15 +105,23 @@ def xyz2uvw(xyz: np.ndarray, ha: float, dec: float, f0: float) -> np.ndarray:
         np.asarray(
             [
                 (np.sin(ha), np.cos(ha), 0),
-                (-np.sin(dec) * np.cos(ha), np.sin(dec) * np.sin(ha), np.cos(dec)),
-                (np.cos(dec) * np.cos(ha), -np.cos(dec) * np.sin(ha), np.sin(dec)),
+                (
+                    -np.sin(dec) * np.cos(ha),
+                    np.sin(dec) * np.sin(ha),
+                    np.cos(dec),
+                ),
+                (
+                    np.cos(dec) * np.cos(ha),
+                    -np.cos(dec) * np.sin(ha),
+                    np.sin(dec),
+                ),
             ]
         ),
         xyz * f0 * 1e6 / getattr(cx, "c").value,
     )
 
 
-class BEAMMODE(Enum):
+class BeamMode(Enum):
     """
     Enum describing beam modes at the GMRT.
 
@@ -120,9 +137,9 @@ class BEAMMODE(Enum):
                that is, we only take the cross terms, and reject all self terms.
     """
 
-    IA = 1
-    PA = 2
-    PC = 3
+    IA = auto()
+    PA = auto()
+    PC = auto()
 
 
 @dataclass
@@ -132,30 +149,17 @@ class GMRTBeam:
     decstr: str
     datestr: str
     timestr: str
-    mode: BEAMMODE
+    mode: BeamMode = BeamMode.PC
     data: np.ndarray | None = None
-    gac: list[str] = field(default_factory=list)
+    gac: list[str] = field(default_factory=lambda: GMRTANTNAMES)
 
-    @classmethod
-    def new(
-        cls,
-        ra: str,
-        dec: str,
-        f0: float,
-        date: str,
-        time: str,
-        mode: str = "PC",
-        gac: list[str] = GMRTANTNAMES,
-    ):
-        return cls(
-            f0=f0,
-            gac=gac,
-            rastr=ra,
-            decstr=dec,
-            datestr=date,
-            timestr=time,
-            mode=BEAMMODE[mode],
-        )
+    def to_fits(self, fn: str | Path):
+        if self.data is not None:
+            header = self.wcs.to_header()
+            hdu = fits.PrimaryHDU(header=header)
+            hdu.data = self.data
+            hdu.update_header()
+            hdu.writeto(fn, overwrite=True)
 
     @cached_property
     def coords(self):
@@ -239,7 +243,7 @@ class GMRTBeam:
         uB, vB, _ = self.allantennas[B]["uvw"]
         uAB = uA - uB
         vAB = vA - vB
-        return np.sqrt(uAB**2 + vAB**2)
+        return float(np.sqrt(uAB**2 + vAB**2))
 
     @cached_property
     def baselines(self) -> dict[str, float]:
@@ -256,7 +260,7 @@ class GMRTBeam:
         uB, vB, _ = self.allantennas[B]["uvw"]
         uAB = uA - uB
         vAB = vA - vB
-        return np.arctan2(vAB, uAB)
+        return float(np.arctan2(vAB, uAB))
 
     @cached_property
     def phases(self) -> dict[str, float]:
@@ -275,6 +279,43 @@ class GMRTBeam:
         return float(1.0 / maxbline)
 
     @cached_property
+    def fovsize(self) -> float:
+        return (10 if getattr(self.dec, "dms")[0] > -20.0 else 30) * self.size
+
+    @cached_property
+    def cellsize(self) -> float:
+        return self.size / 8
+
+    @cached_property
+    def npix(self) -> int:
+        return int(np.floor(self.fovsize / self.cellsize))
+
+    @cached_property
+    def wcs(self) -> WCS:
+        dra = ddec = np.rad2deg(self.fovsize) / self.npix
+        dra = -dra
+        return WCS(
+            {
+                "CTYPE1": "RA---SIN",
+                "CTYPE2": "DEC--SIN",
+                "CUNIT1": "deg",
+                "CUNIT2": "deg",
+                "CDELT1": dra,
+                "CDELT2": ddec,
+                "NAXIS1": self.npix,
+                "NAXIS2": self.npix,
+                "CRPIX1": self.npix / 2,
+                "CRPIX2": self.npix / 2,
+                "CRVAL1": self.ra.deg,
+                "CRVAL2": self.dec.deg,
+                "PC1_1 ": 1.0,
+                "PC1_2 ": 0.0,
+                "PC2_1 ": 0.0,
+                "PC2_2 ": 1.0,
+            }
+        )
+
+    @cached_property
     def hwhm(self) -> float:
         f0 = self.f0 / 1e3
         if 0.120 <= f0 and f0 < 0.250:
@@ -288,10 +329,6 @@ class GMRTBeam:
         else:
             raise ValueError(f"Frequency = {f0} MHz out of range!")
         return float(hwhm)
-
-    @cached_property
-    def fovsize(self) -> float:
-        return (10 if getattr(self.dec, "dms")[0] > -20.0 else 30) * self.size
 
     @cached_property
     def uvcoverage(self):
@@ -334,17 +371,15 @@ class GMRTBeam:
         return x, y
 
     def compute(self):
-        cellsize = self.size / 8
-        npix = int(np.floor(self.fovsize / cellsize))
-        beamgrid = np.ndarray((npix, npix), dtype=np.float32)
+        beamgrid = np.ndarray((self.npix, self.npix), dtype=np.float32)
 
         def _(i):
-            ll = (-0.5 * self.fovsize) + (i * (self.fovsize / npix))
-            for j in np.arange(npix):
-                mm = (-0.5 * self.fovsize) + (j * (self.fovsize / npix))
+            ll = (-0.5 * self.fovsize) + (i * (self.fovsize / self.npix))
+            for j in np.arange(self.npix):
+                mm = (-0.5 * self.fovsize) + (j * (self.fovsize / self.npix))
                 nn = np.sqrt(1 - ll**2 - mm**2)
                 match self.mode:
-                    case BEAMMODE.PA:
+                    case BeamMode.PA:
                         z1 = 0.0
                         z2 = 0.0
                         for A, B in self.antpairs:
@@ -354,7 +389,7 @@ class GMRTBeam:
                             z1 += np.cos(2 * np.pi * X)
                             z2 += np.sin(2 * np.pi * X)
                         beamgrid[j][i] = np.sqrt(z1**2 + z2**2)
-                    case BEAMMODE.PC:
+                    case BeamMode.PC:
                         z = 0
                         for A, B in self.antpairs:
                             uA, vA, wA = self.antennas[A]["uvw"]
@@ -365,27 +400,26 @@ class GMRTBeam:
 
         Parallel(
             njobs=-1,
-            verbose=20,
+            verbose=0,
             return_as="list",
             require="sharedmem",
-        )(delayed(_)(i) for i in np.arange(npix))
+        )(delayed(_)(i) for i in np.arange(self.npix))
 
         beamgrid /= beamgrid.max()
         self.data = beamgrid
 
     def plot(
         self,
+        ax=None,
         show: bool = True,
         save: str | None = None,
-        ax: uplt.Axes | None = None,
         **kwargs,
     ):
-        def _(ax: uplt.Axes):
+        def plotter(ax):
             if self.data is not None:
                 side = np.rad2deg(self.fovsize) * 3600
                 l0, l1 = -side / 2, side / 2
                 m0, m1 = -side / 2, side / 2
-
                 hm = ax.imshow(
                     self.data,
                     cmap="batlow",
@@ -395,7 +429,6 @@ class GMRTBeam:
                     extent=(l0, l1, m0, m1),
                 )
                 ax.invert_xaxis()
-
                 ax.format(
                     title="Synthesized beam",
                     xlabel="l (East-West) arcsec",
@@ -405,13 +438,71 @@ class GMRTBeam:
 
         if ax is None:
             if self.data is not None:
-                fig = uplt.figure(width=7.5, height=7.5)
-                ax = fig.subplot()  # type: ignore
-                assert ax is not None
-                _(ax)
+                fig = getattr(uplt, "figure")(width=3.5, height=3.5)
+                plotter(fig.subplot())
                 if show:
-                    uplt.show()
+                    getattr(uplt, "show")()
                 if save is not None:
                     fig.savefig(save, dpi=kwargs.get("dpi", 150))
         else:
-            _(ax)
+            plotter(ax)
+
+    def plotuv(
+        self,
+        ax=None,
+        show: bool = True,
+        save: str | None = None,
+        **kwargs,
+    ):
+        def plotter(ax):
+            if self.data is not None:
+                ax.scatter(*self.uvcoverage, edgecolor="black")
+                ax.plot(*self.uvestimate, lw=2, color="red")
+                ax.format(
+                    xlabel="u",
+                    ylabel="v",
+                    title=r"$uv$-coverage",
+                )
+
+        if ax is None:
+            fig = getattr(uplt, "figure")(width=3.5, height=3.5)
+            plotter(fig.subplot())
+            if show:
+                getattr(uplt, "show")()
+            if save is not None:
+                fig.savefig(save, dpi=kwargs.get("dpi", 150))
+        else:
+            plotter(ax)
+
+    def plotsky(
+        self,
+        ax=None,
+        show: bool = True,
+        save: str | None = None,
+        **kwargs,
+    ):
+        def plotter(ax):
+            if self.data is not None:
+                hm = ax.imshow(
+                    self.data,
+                    cmap="batlow",
+                    origin="lower",
+                    vmin=self.data.min(),
+                    vmax=self.data.max(),
+                )
+                ax.invert_xaxis()
+                plt.colorbar(hm, ax=ax)
+                ax.set_title("Synthesized beam")
+                ax.set_ylabel("Declination (Dec)")
+                ax.set_xlabel("Right ascension (RA)")
+
+        if ax is None:
+            if self.data is not None:
+                fig = plt.figure(figsize=(4, 4))
+                plotter(fig.add_axes((0.225, 0.1, 0.75, 0.85), projection=self.wcs))
+                if show:
+                    plt.show()
+                if save is not None:
+                    fig.savefig(save, dpi=kwargs.get("dpi", 150))
+        else:
+            plotter(ax)

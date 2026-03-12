@@ -79,86 +79,54 @@ class BeamFitter:
         if data is None:
             self.beam.compute()
             data = self.beam.data
-            assert data is not None
+        if data is not None:
+            npix, npix = data.shape
+            fovsize = self.beam.fovsize
+            deltafov = fovsize / npix
+            beamwidth = self.beam.size / deltafov
+            xside = yside = np.ceil(box * beamwidth).astype(int)
+            xc, yc = np.unravel_index(np.argmax(data), data.shape)
 
-        npix, npix = data.shape
-        fovsize = self.beam.fovsize
-        deltafov = fovsize / npix
-        beamwidth = self.beam.size / deltafov
-        xside = yside = np.ceil(box * beamwidth).astype(int)
-        xc, yc = np.unravel_index(np.argmax(data), data.shape)
+            match self.model:
+                case "gaussian":
+                    cutout = data[xc - xside : xc + xside, yc - yside : yc + yside]
 
-        match self.model:
-            case "gaussian":
-                cutout = data[xc - xside : xc + xside, yc - yside : yc + yside]
+                    A = 1.0
+                    theta = 0.0
+                    x0, y0 = xside, yside
+                    Nx, Ny = cutout.shape
+                    Wx = Wy = beamwidth / 1.5
+                    X, Y = np.arange(Nx), np.arange(Ny)
+                    xy = np.vstack((X.ravel(), Y.ravel()))
 
-                A = 1.0
-                theta = 0.0
-                x0, y0 = xside, yside
-                Nx, Ny = cutout.shape
-                Wx = Wy = beamwidth / 1.5
-                X, Y = np.arange(Nx), np.arange(Ny)
-                xy = np.vstack((X.ravel(), Y.ravel()))
+                    model = Model(gaussian)
+                    params = model.make_params(
+                        A=dict(value=A, min=0.0, max=1.0),
+                        Wx=dict(value=Wx, min=0.0, max=np.inf),
+                        Wy=dict(value=Wy, min=0.0, max=np.inf),
+                        theta=dict(value=theta, min=0.0, max=360.0),
+                        x0=dict(value=x0, min=0.0, max=2 * xside, vary=fix),
+                        y0=dict(value=y0, min=0.0, max=2 * xside, vary=fix),
+                    )
 
-                model = Model(gaussian)
-                params = model.make_params(
-                    A=dict(value=A, min=0.0, max=1.0),
-                    Wx=dict(value=Wx, min=0.0, max=np.inf),
-                    Wy=dict(value=Wy, min=0.0, max=np.inf),
-                    theta=dict(value=theta, min=0.0, max=360.0),
-                    x0=dict(value=x0, min=0.0, max=2 * xside, vary=fix),
-                    y0=dict(value=y0, min=0.0, max=2 * xside, vary=fix),
-                )
+                    result = model.fit(cutout, params, xy=xy)
+                    bestvals = result.best_values
 
-                result = model.fit(cutout, params, xy=xy)
-                bestvals = result.best_values
-
-                theta = bestvals["theta"]
-                x0, y0 = bestvals["x0"], bestvals["y0"]
-                Wx, Wy = bestvals["Wx"], bestvals["Wy"]
-                x0, y0 = x0 + xc - xside, y0 + yc - yside
-                theta = theta - np.floor(theta / 360) * 360
-                theta = theta - 180.0 if theta > 180.0 else theta
-                if Wx > Wy:
-                    a, b = Wx, Wy
-                    theta = theta + 90
+                    theta = bestvals["theta"]
+                    x0, y0 = bestvals["x0"], bestvals["y0"]
+                    Wx, Wy = bestvals["Wx"], bestvals["Wy"]
+                    x0, y0 = x0 + xc - xside, y0 + yc - yside
+                    theta = theta - np.floor(theta / 360) * 360
                     theta = theta - 180.0 if theta > 180.0 else theta
-                else:
-                    b, a = Wx, Wy
-                t = theta + 90
-                a = 2 * a * np.sqrt(-np.log(isophot) * 2)
-                b = 2 * b * np.sqrt(-np.log(isophot) * 2)
-                self.contour = BeamEllipse.new(
-                    a=a,
-                    b=b,
-                    t=t,
-                    x0=x0 - npix / 2,
-                    y0=y0 - npix / 2,
-                )
-                self.contour.x = self.contour.x * np.rad2deg(deltafov) * 3600
-                self.contour.y = self.contour.y * np.rad2deg(deltafov) * 3600
-
-            case "elliptical":
-                params = (0, 0), (-1, -1), 0
-
-                found = False
-                maxoffset = 0.2 * beamwidth
-                contours = find_contours(data, isophot)
-                for contour in contours:
-                    contour = np.array(contour, dtype=np.float32)
-                    ellipse = (0, 0), (-1, -1), 0
-                    ellipse = fitEllipse(contour)
-                    (x0i, y0i), (_, ai), _ = ellipse
-                    xoffset, yoffset = np.abs(x0i - xc), np.abs(y0i - yc)
-                    if (xoffset < maxoffset) and (yoffset < maxoffset):
-                        if not found:
-                            found = True
-                            params = ellipse
-                        else:
-                            (x0, y0), (b, a), t = params
-                            params = ellipse if a > ai else params
-                if found:
-                    (x0, y0), (b, a), t = params
+                    if Wx > Wy:
+                        a, b = Wx, Wy
+                        theta = theta + 90
+                        theta = theta - 180.0 if theta > 180.0 else theta
+                    else:
+                        b, a = Wx, Wy
+                    t = theta + 90
+                    a = 2 * a * np.sqrt(-np.log(isophot) * 2)
+                    b = 2 * b * np.sqrt(-np.log(isophot) * 2)
                     self.contour = BeamEllipse.new(
                         a=a,
                         b=b,
@@ -169,15 +137,46 @@ class BeamFitter:
                     self.contour.x = self.contour.x * np.rad2deg(deltafov) * 3600
                     self.contour.y = self.contour.y * np.rad2deg(deltafov) * 3600
 
+                case "elliptical":
+                    params = (0, 0), (-1, -1), 0
+
+                    found = False
+                    maxoffset = 0.2 * beamwidth
+                    contours = find_contours(data, isophot)
+                    for contour in contours:
+                        contour = np.array(contour, dtype=np.float32)
+                        ellipse = (0, 0), (-1, -1), 0
+                        ellipse = fitEllipse(contour)
+                        (x0i, y0i), (_, ai), _ = ellipse
+                        xoffset, yoffset = np.abs(x0i - xc), np.abs(y0i - yc)
+                        if (xoffset < maxoffset) and (yoffset < maxoffset):
+                            if not found:
+                                found = True
+                                params = ellipse
+                            else:
+                                (x0, y0), (b, a), t = params
+                                params = ellipse if a > ai else params
+                    if found:
+                        (x0, y0), (b, a), t = params
+                        self.contour = BeamEllipse.new(
+                            a=a,
+                            b=b,
+                            t=t,
+                            x0=x0 - npix / 2,
+                            y0=y0 - npix / 2,
+                        )
+                        self.contour.x = self.contour.x * np.rad2deg(deltafov) * 3600
+                        self.contour.y = self.contour.y * np.rad2deg(deltafov) * 3600
+
     def plot(
         self,
+        ax=None,
         show: bool = True,
         plotbeam: bool = True,
         save: str | None = None,
-        ax: uplt.Axes | None = None,
         **kwargs,
     ):
-        def _(ax: uplt.Axes):
+        def plotter(ax):
             if self.contour is not None:
                 if plotbeam:
                     self.beam.plot(ax=ax, show=False)
@@ -185,18 +184,17 @@ class BeamFitter:
                     self.contour.x,
                     self.contour.y,
                     lw=2,
+                    color="red",
                     label=self.model.capitalize(),
                 )
 
         if ax is None:
             if self.contour is not None:
-                fig = uplt.figure(width=7.5, height=7.5)
-                ax = fig.subplot()  # type: ignore
-                assert ax is not None
-                _(ax)
+                fig = getattr(uplt, "figure")(width=3.5, height=3.5)
+                plotter(fig.subplot())
                 if show:
-                    uplt.show()
+                    getattr(uplt, "show")()
                 if save is not None:
                     fig.savefig(save, dpi=kwargs.get("dpi", 150))
         else:
-            _(ax)
+            plotter(ax)

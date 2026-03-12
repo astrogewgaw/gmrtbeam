@@ -24,10 +24,13 @@ dependencies = [
   "numpy",
   "pytz",
   "rich",
-  "scipy",
+  "lmfit",
   "joblib",
   "astropy",
   "ultraplot",
+  "matplotlib",
+  "scikit-image",
+  "opencv-python",
 ]
 
 [project.urls]
