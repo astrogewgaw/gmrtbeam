@@ -12,15 +12,12 @@ from astropy.wcs import WCS
 from astropy.io import fits
 from astropy.time import Time
 import astropy.constants as cx
-from ultraplot.axes import Axes
+import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 from joblib import delayed, Parallel
 from numpy.polynomial import Polynomial
-from astropy.coordinates import (
-    SkyCoord,
-    Latitude,
-    Longitude,
-    EarthLocation,
-)
+from ultraplot.axes import Axes as uAxes
+from astropy.coordinates import SkyCoord, Latitude, Longitude, EarthLocation
 
 # GMRT's antennas list.
 # NOTE: (1) The (x, y, z) coordinates are w.r.t. C02,
@@ -370,7 +367,7 @@ class GMRTBeam:
             y[ii] = ty * np.cos(maxphz) + tx * np.sin(maxphz)
         return x, y
 
-    def compute(self):
+    def compute(self) -> None:
         beamgrid = np.ndarray((self.npix, self.npix), dtype=np.float32)
 
         def _(i):
@@ -410,11 +407,11 @@ class GMRTBeam:
 
     def plot(
         self,
-        ax=None,
         show: bool = True,
         save: str | None = None,
+        ax: uAxes | Axes | None = None,
         **kwargs,
-    ):
+    ) -> None:
         def plotter(ax):
             if self.data is not None:
                 side = np.rad2deg(self.fovsize) * 3600
@@ -449,11 +446,11 @@ class GMRTBeam:
 
     def plotuv(
         self,
-        ax=None,
         show: bool = True,
         save: str | None = None,
+        ax: uAxes | Axes | None = None,
         **kwargs,
-    ):
+    ) -> None:
         def plotter(ax):
             if self.data is not None:
                 ax.scatter(*self.uvcoverage, edgecolor="black")
@@ -476,11 +473,11 @@ class GMRTBeam:
 
     def plotsky(
         self,
-        ax: Axes | None = None,
         show: bool = True,
         save: str | None = None,
+        ax: Axes | None = None,
         **kwargs,
-    ):
+    ) -> None:
         def plotter(ax):
             if self.data is not None:
                 hm = ax.imshow(
@@ -490,16 +487,18 @@ class GMRTBeam:
                     vmin=self.data.min(),
                     vmax=self.data.max(),
                 )
-                ax.colorbar(hm)
                 ax.invert_xaxis()
                 ax.set_title("Synthesized beam")
                 ax.set_ylabel("Declination (Dec)")
                 ax.set_xlabel("Right ascension (RA)")
+                return hm
 
         if ax is None:
             if self.data is not None:
-                fig = getattr(uplt, "figure")(width=4, height=4)
-                plotter(fig.subplot(projection=self.wcs))
+                fig = plt.figure(figsize=(4, 4))
+                ax = fig.add_subplot(projection=self.wcs)
+                hm = plotter(ax)
+                fig.colorbar(hm)
                 if show:
                     getattr(uplt, "show")()
                 if save is not None:

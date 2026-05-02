@@ -1,11 +1,12 @@
-from typing import Literal
+from typing import cast, Literal
 from dataclasses import dataclass
 
 import numpy as np
 from lmfit import Model
 import ultraplot as uplt
 from cv2 import fitEllipse
-from ultraplot.axes import Axes
+from matplotlib.axes import Axes
+from ultraplot.axes import Axes as uAxes
 from skimage.measure import find_contours
 
 from gmrtbeam.core import GMRTBeam
@@ -171,10 +172,10 @@ class BeamFitter:
 
     def plot(
         self,
-        ax: Axes | None = None,
         show: bool = True,
         plotbeam: bool = True,
         save: str | None = None,
+        ax: uAxes | Axes | None = None,
         **kwargs,
     ):
         def plotter(ax):
@@ -192,7 +193,9 @@ class BeamFitter:
         if ax is None:
             if self.contour is not None:
                 fig = getattr(uplt, "figure")(width=3.5, height=3.5)
-                plotter(fig.subplot())
+                ax = cast(uAxes, fig.subplot())
+                plotter(ax)
+                ax.legend(loc="upper right", ncol=1)
                 if show:
                     getattr(uplt, "show")()
                 if save is not None:

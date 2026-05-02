@@ -7,7 +7,9 @@ import ultraplot as uplt
 import astropy.units as u
 from astropy.wcs import WCS
 from astropy.io import fits
-from ultraplot.axes import Axes
+import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
+from ultraplot.axes import Axes as uAxes
 from astropy.visualization.wcsaxes import SphericalCircle
 
 from gmrtbeam.core import GMRTBeam
@@ -71,7 +73,7 @@ class GMRTMosaic:
         beamusage: float = 0.95,
         areausage: float = 0.85,
         recenter: bool = True,
-    ):
+    ) -> None:
         self.fitter.fit()
         self.ellipse = self.fitter.contour
         if self.ellipse is not None:
@@ -198,11 +200,11 @@ class GMRTMosaic:
 
     def plot(
         self,
-        ax: Axes | None = None,
         show: bool = True,
         save: str | None = None,
+        ax: uAxes | Axes | None = None,
         **kwargs,
-    ):
+    ) -> None:
         def plotter(ax):
             if (self.grid is not None) and (self.ellipse is not None):
                 transform = ax.get_transform("icrs")  # type: ignore
@@ -258,19 +260,16 @@ class GMRTMosaic:
                 ax.set_ylabel("Declination (Dec)")
                 ax.set_xlabel("Right ascension (RA)")
 
-                lines, labels = [
-                    sum(lol, [])
-                    for lol in zip(*[ax.get_legend_handles_labels() for ax in fig.axes])
-                ]
+        if ax is None:
+            if self.grid is not None:
+                fig = plt.figure(figsize=(7.5, 7.5))
+                ax = fig.add_subplot(projection=self.wcs)
+                plotter(ax)
+                lines, labels = ax.get_legend_handles_labels()
                 unique_labels = set(labels)
                 legend = dict(zip(labels, lines))
                 unique_lines = [legend[x] for x in unique_labels]
-                ax.legend(unique_lines, unique_labels, loc="ur", ncol=1)
-
-        if ax is None:
-            if self.grid is not None:
-                fig = getattr(uplt, "figure")(figsize=(7.5, 7.5))
-                plotter(fig.subplot(projection=self.wcs))
+                ax.legend(unique_lines, unique_labels, loc="upper right", ncol=1)
                 if show:
                     getattr(uplt, "show")()
                 if save is not None:
